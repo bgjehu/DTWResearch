@@ -3,7 +3,16 @@ __author__ = 'Jieyi Hu'
 from random import randint
 import math
 import time
-import multiprocessing as mp
+from multiprocessing.pool import ThreadPool
+import multiprocessing
+
+testcase1 = None
+testcase2 = None
+height = None
+cost_table = None
+similarity = None
+diagonal_iterator = None
+
 
 
 def rand_test_case(width, height):
@@ -16,21 +25,9 @@ def rand_test_case(width, height):
     return test_case
 
 
-def euclidean_dist(row1, row2):
-    '''
-    sum = 0
-    for i in range(len(row1)):
-        sum += math.pow(row1[i] - row2[i], 2)
-    '''
+def euclidean_distance(row1, row2):
     values = map(lambda x,y: math.pow(x - y, 2), row1, row2)
     return math.sqrt(reduce(lambda x,y:x+y, values))
-
-def base_dist(idx, testcase1, testcase2):
-    height = len(testcase1)
-    row = idx / height
-    col = idx % height
-    return euclidean_dist(testcase1[row],testcase2[col])
-
 
 
 def init_cost_table(height):
@@ -42,42 +39,99 @@ def init_cost_table(height):
     return table
 
 
-def find_similarity_seq(testcase1, testcase2):
-    start_time = time.time()                    #   record starting time
+def fill_cost_table_cell(i):
+    #   get global vars
+    global testcase1
+    global testcase2
+    global height
+    global cost_table
+    global similarity
+    global diagonal_iterator
+
+    #   fill_cell
+    x = i
+    y = diagonal_iterator + 1 - x
+    cost = euclidean_distance(testcase1[x - 1], testcase2[y - 1]) + min(cost_table[x - 1][y], cost_table[x][y- 1], cost_table[x-1][y-1])
+    cost_table[x][y] = cost
+    if x == height or y == height:
+        cellSimilarity = cost + abs(x - height) + abs(y - height)
+        if cellSimilarity < similarity:
+            similarity = cellSimilarity
+
+
+
+def find_similarity_in_sequential(t1, t2, dolog):
+    #   set global vars
+    global testcase1
+    global testcase2
+    global height
+    global cost_table
+    global similarity
+    testcase1 = t1
+    testcase2 = t2
     height = len(testcase1)
-    table = init_cost_table(height)             #   initiate cost table
-    similarity = float("inf")                   #   set similarity to infinite
+    cost_table = init_cost_table(height)
+    similarity = float('inf')
+
+    #   mark start time
+    start_time = time.time()
+
+    #   actually DTW
     for i in range(1, height + 1):              #   go through cost table cells one by one and calculate their costs
         for j in range(1, height + 1):
-            row1 = testcase1[i - 1]
-            row2 = testcase2[j - 1]
-            table[i][j] = euclidean_dist(row1, row2) + min(table[i][j-1], table[i-1][j], table[i-1][j-1])
+            cost_table[i][j] = euclidean_distance(testcase1[i - 1], testcase2[j - 1]) + min(cost_table[i][j - 1], cost_table[i - 1][j], cost_table[i - 1][j - 1])
             if i == height or j == height:      #   find minimum cost on the fly among last column and row
-                cellSimilarity = table[i][j] + abs(i - height) + abs(j - height)
+                cellSimilarity = cost_table[i][j] + abs(i - height) + abs(j - height)
                 if cellSimilarity < similarity:
                     similarity = cellSimilarity
-    return similarity, time.time() - start_time    #   returns similarity and run time
+
+    #   mark end time
+    run_time = time.time() - start_time
+
+    #   log
+    if dolog:
+        print "similarity:{0:.2f}, runtime:{1:.6f}".format(similarity, run_time)
+
+    #   return
+    return similarity, run_time
 
 
-def find_similarity_par(testcase1, testcase2):
-    start_time = time.time()                    #   record starting time
+def find_similarity_in_parallel(t1, t2, processes, dolog):
+    #   set global vars
+    global testcase1
+    global testcase2
+    global height
+    global cost_table
+    global similarity
+    global diagonal_iterator
+    testcase1 = t1
+    testcase2 = t2
     height = len(testcase1)
-    jobs_count = height * height
-    processes_count = 16
-    table = init_cost_table(height)             #   initiate cost table
-    similarity = float("inf")                   #   set similarity to infinite
-    pool = mp.Pool(processes=processes_count)   #   calculate base distances in parallel
-    base_distances = [pool.apply_async(base_dist,args=(i, testcase1, testcase2)) for i in range(jobs_count)]
-    pool = mp.Pool(processes=height)            #   calculate actually distance in parallel with red white algorithm
-    print time.time() - start_time
+    cost_table = init_cost_table(height)
+    similarity = float('inf')
+    diagonal_iterator = 0
 
+    #   mark start time
+    start_time = time.time()
 
+    #   actually DTW
+    for i in range(1, 2*height):
+        diagonal_iterator = i
+        start_index = 1
+        end_index = i + 1
+        if i > height:
+            start_index = 1 + i - height
+            end_index = 1 + height
+        iterator = range(start_index, end_index)
+        work = ThreadPool(processes=processes).map(fill_cost_table_cell,iterator)
+        #work = multiprocessing.Pool(processes=processes).map(fill_cost_table_cell,iterator)
 
+    #   mark end time
+    run_time = time.time() - start_time
 
-tc1 = rand_test_case(3,100)
-tc2 = rand_test_case(3,100)
-print find_similarity_seq(tc1, tc2)
-find_similarity_par(tc1, tc2)
+    #   log
+    if dolog:
+        print "similarity:{0:.2f}, runtime:{1:.6f}".format(similarity, run_time)
 
-
-
+    #   return
+    return similarity, run_time
